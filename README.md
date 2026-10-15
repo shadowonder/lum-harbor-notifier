@@ -2,9 +2,14 @@
 
 Lum Harbor is a local-first work cockpit for long-running WorkItems, daily planning, external evidence, AI-assisted proposals, reminders, notifications, and explainable History.
 
-Start with the bilingual Project Handbook: [English](../docs/handbook/README.md) · [中文](../docs/handbook/README.zh-CN.md).
+## Documentation
 
-Contributor shortcuts: [Build & Run](../docs/handbook/en/build-and-run.md) · [Plugin Development](../docs/handbook/en/plugin-development.md).
+- [Documentation index](docs/README.md)
+- Project Handbook: [English](docs/handbook/README.md) · [中文](docs/handbook/README.zh-CN.md)
+- Product Guide: [English](docs/handbook/en/product-guide.md) · [中文](docs/handbook/zh-CN/product-guide.md)
+- Contributor guides: [Build & Run](docs/handbook/en/build-and-run.md) · [Plugin Development](docs/handbook/en/plugin-development.md)
+
+This repository keeps only public, README-level product and contributor documentation. Internal development-state, contract, audit, and implementation-report documents are maintained separately and are not duplicated here.
 
 ## Live Development
 
