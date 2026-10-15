@@ -1,0 +1,275 @@
+name: Build and release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional release version, with or without v (for example, 1.0.0)"
+        required: false
+        type: string
+      prerelease:
+        description: "Publish as a pre-release"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: lum-harbor-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+  WAILS_VERSION: "v2.15.0"
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Select and validate release tag
+        id: release
+        shell: bash
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$VERSION_INPUT" ]]; then
+            version="${VERSION_INPUT#v}"
+          else
+            version="0.0.${GITHUB_RUN_NUMBER}-build.${GITHUB_RUN_ATTEMPT}"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version must be valid SemVer, for example 1.2.3 or 1.2.3-beta.1." >&2
+            exit 1
+          fi
+
+          tag="v${version}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists. Choose a new version." >&2
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${tag}"
+
+  verify:
+    name: Verify source
+    needs: prepare
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run backend tests
+        run: go test ./...
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  build-macos:
+    name: Build macOS arm64
+    needs: [prepare, verify]
+    runs-on: macos-15
+    env:
+      CGO_LDFLAGS: -framework UniformTypeIdentifiers
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build application
+        run: wails build -clean -platform darwin/arm64
+
+      # Ad-hoc signing seals bundle integrity but does not establish Gatekeeper trust for downloads.
+      - name: Ad-hoc sign and verify application
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_bundle="build/bin/lum-harbor-notifier.app"
+          test -d "$app_bundle"
+
+          # Sign nested native code first so the outer bundle seals its final state.
+          while IFS= read -r -d '' candidate; do
+            if file -b "$candidate" | grep -q "Mach-O"; then
+              codesign --force --sign - "$candidate"
+            fi
+          done < <(find "$app_bundle/Contents" -type f -print0)
+
+          # Sign nested code bundles deepest-first if helpers are added later.
+          while IFS= read -r -d '' nested_bundle; do
+            codesign --force --sign - "$nested_bundle"
+          done < <(
+            find "$app_bundle/Contents" -depth -type d \
+              \( -name "*.app" -o -name "*.framework" -o -name "*.xpc" -o -name "*.appex" \) \
+              -print0
+          )
+
+          codesign --force --sign - "$app_bundle"
+          codesign --verify --deep --strict --verbose=2 "$app_bundle"
+
+      - name: Package application
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test -d build/bin/lum-harbor-notifier.app
+          mkdir -p release
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/bin/lum-harbor-notifier.app \
+            "release/lum-harbor-notifier-${RELEASE_TAG}-macos-arm64.zip"
+
+      - name: Upload macOS release file
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-macos-arm64
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows x64
+    needs: [prepare, verify]
+    runs-on: windows-2025
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress --yes
+
+      - name: Install Wails
+        shell: pwsh
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: Build application and installer
+        shell: pwsh
+        run: wails build -clean -platform windows/amd64 -nsis
+
+      - name: Package application
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $portable = "build/bin/lum-harbor-notifier.exe"
+          $installer = "build/bin/lum-harbor-notifier-amd64-installer.exe"
+
+          if (-not (Test-Path $portable -PathType Leaf)) {
+            throw "Windows portable executable was not produced: $portable"
+          }
+          if (-not (Test-Path $installer -PathType Leaf)) {
+            throw "Windows installer was not produced: $installer"
+          }
+
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item $portable "release/lum-harbor-notifier-$env:RELEASE_TAG-windows-amd64.exe"
+          Copy-Item $installer "release/lum-harbor-notifier-$env:RELEASE_TAG-windows-amd64-installer.exe"
+
+      - name: Upload Windows release files
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-windows-amd64
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Create tag and GitHub Release
+    needs: [prepare, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@v6
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create checksums
+        working-directory: release-assets
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          release_args=(
+            "$RELEASE_TAG"
+            release-assets/*
+            --target "$GITHUB_SHA"
+            --title "Lum Harbor ${RELEASE_TAG}"
+            --generate-notes
+          )
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            release_args+=(--prerelease)
+          fi
+
+          gh release create "${release_args[@]}"

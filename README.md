@@ -22,4 +22,12 @@ to this in your browser, and you can call your Go code from devtools.
 
 To build a redistributable, production mode package, use `wails build`.
 
+## Manual releases
+
+The **Build and release** GitHub Actions workflow creates macOS arm64 and Windows x64 release files, checksums, a new Git tag, and a GitHub Release. Run it from the repository's **Actions** tab with **Run workflow**.
+
+You may enter a semantic version such as `1.0.0` or `v1.0.0`. If the version is left blank, the workflow assigns a unique build version. The workflow rejects an existing tag and creates the tag and release only after verification and both platform builds succeed.
+
+The current workflow produces a Wails self-signed macOS bundle and unsigned Windows binaries. Apple notarization and trusted Windows code signing require distribution credentials and are not performed by this workflow.
+
 For real product verification, use the production bundle with a fresh isolated user data directory. Do not use an old development database: before the first public release, the single foundation migration is intentionally evolved in place.
