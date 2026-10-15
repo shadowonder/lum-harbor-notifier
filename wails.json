@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "lum-harbor-notifier",
+  "outputfilename": "lum-harbor-notifier",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Shuo"
+  },
+  "info": {
+    "protocols": [
+      {
+        "scheme": "lumharbor",
+        "description": "Open a Lum Harbor notification target",
+        "role": "Viewer"
+      }
+    ]
+  }
+}
