@@ -28,12 +28,13 @@ type Runtime struct {
 	extensionIDs    []string
 	shutdownTimeout time.Duration
 
-	mu       sync.Mutex
-	started  bool
-	terminal bool
-	result   error
-	done     chan struct{}
-	once     sync.Once
+	mu              sync.Mutex
+	started         bool
+	terminal        bool
+	result          error
+	reportedTimeout error
+	done            chan struct{}
+	once            sync.Once
 }
 
 func New(scheduler *background.Scheduler, host PluginHost, instances []plugin.Instance, shutdownTimeout time.Duration) (*Runtime, error) {
@@ -107,7 +108,7 @@ func (r *Runtime) Shutdown() error {
 	case <-r.done:
 		return r.shutdownResult()
 	case <-timer.C:
-		return fmt.Errorf("application runtime shutdown: %w", context.DeadlineExceeded)
+		return r.recordShutdownTimeout()
 	}
 }
 
@@ -164,10 +165,26 @@ func (r *Runtime) cleanupFailedStart() error {
 
 func (r *Runtime) finish(result error) {
 	r.mu.Lock()
+	if r.reportedTimeout != nil && !errors.Is(result, context.DeadlineExceeded) {
+		result = errors.Join(result, r.reportedTimeout)
+	}
 	r.result = result
 	r.terminal = true
 	close(r.done)
 	r.mu.Unlock()
+}
+
+func (r *Runtime) recordShutdownTimeout() error {
+	timeoutErr := fmt.Errorf("application runtime shutdown: %w", context.DeadlineExceeded)
+	r.mu.Lock()
+	if r.reportedTimeout == nil {
+		r.reportedTimeout = timeoutErr
+		if r.terminal && !errors.Is(r.result, context.DeadlineExceeded) {
+			r.result = errors.Join(r.result, timeoutErr)
+		}
+	}
+	r.mu.Unlock()
+	return timeoutErr
 }
 
 func (r *Runtime) shutdownResult() error {

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -905,6 +906,9 @@ func TestSeedV2Integrity(t *testing.T) {
 
 	seedSQLPath := "../../../docs/lum_harbor_workitem_visual_iteration_seed_v2.sql"
 	content, err := os.ReadFile(seedSQLPath)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skipf("external visual-iteration seed fixture not found: %s", seedSQLPath)
+	}
 	if err != nil {
 		t.Fatalf("failed to read seed v2 SQL file: %v", err)
 	}
