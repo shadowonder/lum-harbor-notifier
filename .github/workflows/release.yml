@@ -286,6 +286,7 @@ jobs:
           release_args=(
             "$RELEASE_TAG"
             release-assets/*
+            --repo "$GITHUB_REPOSITORY"
             --target "$GITHUB_SHA"
             --title "Lum Harbor ${RELEASE_TAG}"
             --generate-notes
