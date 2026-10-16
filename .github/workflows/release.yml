@@ -195,7 +195,26 @@ jobs:
 
       - name: Install NSIS
         shell: pwsh
-        run: choco install nsis --no-progress --yes
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install nsis --no-progress --yes
+
+          $candidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe")
+            (Join-Path $env:ProgramFiles "NSIS\makensis.exe")
+            (Join-Path $env:ChocolateyInstall "bin\makensis.exe")
+          )
+          $makensis = $candidates |
+            Where-Object { Test-Path $_ -PathType Leaf } |
+            Select-Object -First 1
+
+          if (-not $makensis) {
+            throw "NSIS installation did not produce makensis.exe in an expected location"
+          }
+
+          $nsisDirectory = Split-Path -Parent $makensis
+          $nsisDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "NSIS available at $makensis"
 
       - name: Install Wails
         shell: pwsh
@@ -203,7 +222,11 @@ jobs:
 
       - name: Build application and installer
         shell: pwsh
-        run: wails build -clean -platform windows/amd64 -nsis
+        run: |
+          $ErrorActionPreference = "Stop"
+          $makensis = Get-Command makensis.exe -ErrorAction Stop
+          Write-Host "Using NSIS at $($makensis.Source)"
+          wails build -clean -platform windows/amd64 -nsis
 
       - name: Package application
         shell: pwsh
