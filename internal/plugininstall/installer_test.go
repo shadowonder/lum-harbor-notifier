@@ -714,15 +714,18 @@ func TestShippedPluginPlatformMetadataAndNegativeCompatibility(t *testing.T) {
 		id   string
 		path string
 	}{
-		{id: "lh-plugin-ai-runtime", path: filepath.Join("..", "..", "..", "lh-plugin-ai-runtime", "plugin.json")},
-		{id: "lh-plugin-synthetic-project", path: filepath.Join("..", "..", "..", "lh-plugin-synthetic-project", "plugin.json")},
-		{id: "lh-plugin-apple-reminders", path: filepath.Join("..", "..", "..", "lh-plugin-apple-reminders", "plugin.json")},
-		{id: "lh-plugin-macos-notifications", path: filepath.Join("..", "..", "..", "lh-plugin-macos-notifications", "plugin.json")},
+		{id: "lh-plugin-ai-runtime", path: filepath.Join("..", "..", "..", "lum-harbor-plugins", "lh-plugin-ai-runtime", "plugin.json")},
+		{id: "lh-plugin-synthetic-project", path: filepath.Join("..", "..", "..", "lum-harbor-plugins", "lh-plugin-synthetic-project", "plugin.json")},
+		{id: "lh-plugin-apple-reminders", path: filepath.Join("..", "..", "..", "lum-harbor-plugins", "lh-plugin-apple-reminders", "plugin.json")},
+		{id: "lh-plugin-macos-notifications", path: filepath.Join("..", "..", "..", "lum-harbor-plugins", "lh-plugin-macos-notifications", "plugin.json")},
 	}
 
 	for _, tc := range manifests {
 		t.Run(tc.id, func(t *testing.T) {
 			data, err := os.ReadFile(tc.path)
+			if errors.Is(err, os.ErrNotExist) {
+				t.Skipf("shipped manifest not found in external plugin repository: %s", tc.path)
+			}
 			if err != nil {
 				t.Fatalf("read manifest %s: %v", tc.path, err)
 			}
